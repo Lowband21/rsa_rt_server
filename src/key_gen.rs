@@ -18,7 +18,7 @@ fn store_keys_in_files(pub_key: &PublicKey, priv_key: &PrivateKey) {
     write!(file, "{}\n{}", priv_key.d, priv_key.n).unwrap();
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize,Eq, Hash, PartialEq)]
 pub struct PublicKey {
     pub e: String,
     pub n: String,

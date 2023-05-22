@@ -5,10 +5,15 @@ use crate::rsa::*;
 use num_bigint::BigUint;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use tokio::sync::Mutex;
+use tokio::sync::broadcast::error::RecvError;
+use std::collections::HashMap;
 use std::error::Error;
+use std::hash::Hash;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpSocket,TcpStream};
 
 use rand::Rng; // Add this for generating random nonces
 
@@ -99,5 +104,56 @@ async fn main() {
     let pub_key = read_public_key_from_file("public_key.txt").unwrap();
     let priv_key = read_private_key_from_file("private_key.txt").unwrap();
     let result = start_server("localhost:8000", pub_key, priv_key).await;
+
+
     result.unwrap();
+}
+async fn start_other_server() ->  Result<(), Box<dyn Error>>{
+    let socket = TcpListener::bind("127.0.0.1:9000").await?;
+    let user_map : Arc<Mutex<HashMap<PublicKey, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    loop {
+        let stream = socket.accept().await?.0;
+        let Ok(data) = verify_user(stream).await else {
+            println!("User un verifiable");
+            break;
+        };
+
+        let mut m = user_map.lock().await;
+        m.insert(data.0, data.1);
+        todo!("Fix");
+        // Note does not work Due to need of a duplicate stream, to add the user to teh connected_users_map to write
+        // But to handle to connection to read from it
+        handle_connection(user_map.clone(), data.1);
+    }
+
+    Ok(())
+}
+
+async fn verify_user(mut socket: TcpStream) -> Result<(PublicKey,tokio::net::TcpStream), Box<dyn Error>> {
+    let mut buf = [0; 1024];
+    socket.read(&mut buf).await?;
+    let client_pub_key = PublicKey::from_bytes(&buf)?;
+
+    let mut rng = StdRng::from_entropy();
+    let random_secret: u128 = rng.gen();
+
+
+    let encrypted_secret = rsa_encrypt(&client_pub_key, &random_secret.to_string());
+    socket.write_all(&encrypted_secret[0].to_bytes_le() ).await;
+    
+    buf.fill(0);
+    socket.read(&mut buf).await?;
+    let test_num = BigUint::from_bytes_le(&buf);
+
+    if test_num == random_secret.into() {
+        return Ok((client_pub_key,socket));
+    } else {
+        socket.shutdown();
+        return Err(Box::new(RecvError::Closed));
+    }
+}
+
+async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicKey, TcpStream>>>, stream:TcpStream) {
+
 }
