@@ -110,7 +110,7 @@ async fn main() {
 }
 async fn start_other_server() ->  Result<(), Box<dyn Error>>{
     let socket = TcpListener::bind("127.0.0.1:9000").await?;
-    let user_map : Arc<Mutex<HashMap<PublicKey, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
+    let user_map : Arc<Mutex<HashMap<PublicKey, Arc<Mutex<TcpStream>>>>> = Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let stream = socket.accept().await?.0;
@@ -120,11 +120,9 @@ async fn start_other_server() ->  Result<(), Box<dyn Error>>{
         };
 
         let mut m = user_map.lock().await;
-        m.insert(data.0, data.1);
-        todo!("Fix");
-        // Note does not work Due to need of a duplicate stream, to add the user to teh connected_users_map to write
-        // But to handle to connection to read from it
-        handle_connection(user_map.clone(), data.1);
+        let wrapped_socket = Arc::new(Mutex::new(data.1));
+        m.insert(data.0, wrapped_socket.clone());
+        handle_connection(user_map.clone(), wrapped_socket.clone()).await;
     }
 
     Ok(())
@@ -137,7 +135,6 @@ async fn verify_user(mut socket: TcpStream) -> Result<(PublicKey,tokio::net::Tcp
 
     let mut rng = StdRng::from_entropy();
     let random_secret: u128 = rng.gen();
-
 
     let encrypted_secret = rsa_encrypt(&client_pub_key, &random_secret.to_string());
     socket.write_all(&encrypted_secret[0].to_bytes_le() ).await;
@@ -154,6 +151,13 @@ async fn verify_user(mut socket: TcpStream) -> Result<(PublicKey,tokio::net::Tcp
     }
 }
 
-async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicKey, TcpStream>>>, stream:TcpStream) {
-
+async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicKey, Arc<Mutex<TcpStream>>>>>, stream: Arc<Mutex<TcpStream>>) {
+    let mut buf = [0; 1024];
+    loop {
+        let s = stream.lock().await;
+        let b = s.try_read(&mut buf);
+        // if s.try_read(buf)
+        // if s.read(buf)
+    }
 }
+
