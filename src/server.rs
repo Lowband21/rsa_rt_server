@@ -141,14 +141,44 @@ async fn handle_connection(
                     // How do we know when the message has finsihed transmitting? what if we read at tcp packet one
                     // but we dont wait for packets 2-5, maybe continuely loop inside here
                     println!("Data in buffer!");
-
-                    let trimmed_buffer = buf
+                    // Append first chunk
+                    let mut big_buffer : Vec<u8> = Vec::new();
+                        let mut trimmed_buffer = buf
                         .iter()
                         .enumerate()
                         .filter(|x| x.0 < num_bytes)
                         .map(|x| *x.1 as u8)
                         .collect();
-                    let response = String::from_utf8(trimmed_buffer).unwrap();
+                    big_buffer.append(&mut trimmed_buffer);
+
+                    // Loop checking until buffer is empty
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        let in_socket = s.try_read(&mut buf);
+                        match in_socket {
+                            Ok(num_bytes) => {
+                                if num_bytes == 0 {
+                                    println!("\tFound no extra bytes");
+                                    break;
+                                }
+                                println!("\tFound {} extra bytes", num_bytes);
+                                let mut trimmed_buffer = buf
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|x| x.0 < num_bytes)
+                                    .map(|x| *x.1 as u8)
+                                    .collect();
+                                big_buffer.append(&mut trimmed_buffer);
+                            },
+                            Err(_) => {
+                                println!("\tFound no extra bytes");
+                                break;
+                            }
+                        }
+                       
+                    }
+                   
+                    let response = String::from_utf8(big_buffer).unwrap();
 
                     let i: Vec<&str> = response.split("-").collect();
                     println!("Key + message: {:?}", i);
