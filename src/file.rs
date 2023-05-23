@@ -13,12 +13,13 @@ use num::bigint::{BigUint, RandBigInt, BigInt,ToBigInt};
 use rand::{SeedableRng, Rng, RngCore};
 
 use rand::rngs::StdRng;
+use tokio::macros::support::poll_fn;
 use std::collections::HashMap;
 use std::error::Error;
 use tokio::sync::{Mutex};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpSocket,TcpStream};
-
+use tokio::macros::support::Poll;
 // use tokio
 
 pub async fn start_other_server() ->  Result<(), Box<dyn Error>>{
@@ -43,7 +44,7 @@ pub async fn start_other_server() ->  Result<(), Box<dyn Error>>{
         let ucp = user_map.clone();
 
         let t = tokio::spawn(async move {
-            handle_connection(ucp, wrapped_socket.clone()).await;
+            handle_connection(ucp, wrapped_socket.clone(), stream.1).await;
         });
     }
 
@@ -73,6 +74,7 @@ async fn verify_user(mut socket: TcpStream) -> Result<(PublicRSAKey,tokio::net::
     let num_bytes = socket.read(&mut buf).await?;
     let trimmed_buffer = buf.to_vec().iter().enumerate().filter(|x| x.0 < num_bytes).map(|x| *x.1 as u8).collect();
     let response = String::from_utf8(trimmed_buffer).unwrap();
+
     let test_num = BigUint::from_str(&response)?;
 
     if test_num == random_secret.into() {
@@ -83,30 +85,59 @@ async fn verify_user(mut socket: TcpStream) -> Result<(PublicRSAKey,tokio::net::
     }
 }
 
-async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicRSAKey, Arc<Mutex<TcpStream>>>>>, stream: Arc<Mutex<TcpStream>>) {
-    let mut buf = [0;4096];
-    loop {
+async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicRSAKey, Arc<Mutex<TcpStream>>>>>, stream: Arc<Mutex<TcpStream>>, id:std::net::SocketAddr) {
+    let mut buf: [u8; 4096] = [0;4096];
+    // let mut buf = ReadBuf::new(&mut buf);
+
+    let mut socket_open = true;
+    while socket_open == true {
+
         let mut s = stream.lock().await;
-        if s.peek(&mut buf).await.unwrap() == 0 {
-            println!("Nothing in buffer {:?}, waiting", stream);
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-            continue;
-        } 
-        let num_bytes = s.read(&mut buf).await.unwrap();
-        let trimmed_buffer = buf.iter().enumerate().filter(|x| x.0 < num_bytes).map(|x| *x.1 as u8).collect();
-        let response = String::from_utf8(trimmed_buffer).unwrap();
+        println!("Aquired lock for {}\n\tpeeking for data", id);
 
+        let in_socket = s.try_read(&mut buf);
+        match in_socket {
+            Err(e) => {
+                println!("\tNo data in buffer\n\tDropping Lock for {}", id);
+                drop(s);
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                continue;
+            }
+            Ok(num_bytes) => {
+                if num_bytes == 0 {
+                    s.shutdown();
+                    drop(s);
+                    println!("Stream Closed");
+                    socket_open = false;
+                    break;
+       
+                } else {
+                    println!("Data in buffer!"); 
 
-        let mut i = response.split("-");
-        let key_as_string = i.next().unwrap();
-        println!("key:{}",key_as_string);
-        let message = i.next().unwrap();
-        println!("message:{}",message);
-
-        let recv = PublicRSAKey::from_string(key_as_string.to_owned()).unwrap();
-        let mut u =  user_map.lock().await;
-        let mut recv_stream = (*u).get_mut(&recv).unwrap().lock().await;
-        recv_stream.write(message.as_bytes()).await;
+                    let trimmed_buffer = buf.iter().enumerate().filter(|x| x.0 < num_bytes).map(|x| *x.1 as u8).collect();
+                    let response = String::from_utf8(trimmed_buffer).unwrap();
+            
+                    let mut i : Vec<&str> = response.split("-").collect();
+                    println!("Key + message: {:?}", i);
+                    let key_as_string = i[0];
+                    // println!("\tkey:{}",key_as_string);
+                    let message = i[1];
+                    // println!("\tmessage:{}",message);
+            
+                    let recv = PublicRSAKey::from_string(key_as_string.to_owned()).unwrap();
+                    println!("Public key obj {:?}", recv);
+                    let mut u =  user_map.lock().await;
+                    println!("User map lock acuired");
+                    let mut recv_stream = (*u).get(&recv).unwrap();
+                    println!("Reciever Stream found");
+                    let mut recv_stream = recv_stream.lock().await;
+                    println!("Reciever stream lock aquired");
+                    recv_stream.write(message.as_bytes()).await;
+                    println!("Data written");
+                }
+            }
+        }
+      
     }
 }
 
