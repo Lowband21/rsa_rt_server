@@ -1,0 +1,13 @@
+Currently create_other_server in file.rs works like this
+Server accepts tcp connection and needs to immedietly be sent a rsa public key in the following format:
+big_n,big_e
+encoded using biguint.tostring() on the n and the e
+Then the server will encrypt a secret and send it back down the socket as Biguint.to_le_bytes()
+and expect the decrypted answer
+
+Then the connection will either be dropped or verified,
+
+verified will accept connections of the form 
+big_n,big_e-[MESSAGE]
+
+where big_n,big_e is the public key of the reciepient

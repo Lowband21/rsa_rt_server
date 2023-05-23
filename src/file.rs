@@ -112,6 +112,9 @@ async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicRSAKey, Arc<Mutex<
                     break;
        
                 } else {
+                    // NOTE NEED TO ADD message end character to end of message, or a message length header
+                    // How do we know when the message has finsihed transmitting? what if we read at tcp packet one
+                    // but we dont wait for packets 2-5, maybe continuely loop inside here 
                     println!("Data in buffer!"); 
 
                     let trimmed_buffer = buf.iter().enumerate().filter(|x| x.0 < num_bytes).map(|x| *x.1 as u8).collect();
