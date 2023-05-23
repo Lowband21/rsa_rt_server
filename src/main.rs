@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod key_gen;
 use crate::key_gen::{PrivateKey, PublicKey};
 mod rsa;
@@ -16,6 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket,TcpStream};
 
 use rand::Rng; // Add this for generating random nonces
+mod file;
 
 async fn start_server(
     local_addr: &str,
@@ -101,63 +104,18 @@ async fn start_server(
 
 #[tokio::main]
 async fn main() {
-    let pub_key = read_public_key_from_file("public_key.txt").unwrap();
-    let priv_key = read_private_key_from_file("private_key.txt").unwrap();
-    let result = start_server("localhost:8000", pub_key, priv_key).await;
+    // let pub_key = read_public_key_from_file("public_key.txt").unwrap();
+    // let priv_key = read_private_key_from_file("private_key.txt").unwrap();
+    // let result = start_server("localhost:8000", pub_key, priv_key).await;
+    // let b = tokio::net::TcpListener::bind("127.0.0.1:9000").await.unwrap();
+    // loop{
+    //     let mut s = b.accept().await.unwrap();
+    //     println!("Accepted {}", s.1);
+    //     let mut stri = String::new();
+    //     let b = s.0.read_to_string(&mut stri).await;
+    //     println!("{}", stri);
+    // }
 
-
-    result.unwrap();
+    file::start_other_server().await.expect("What");
+    // result.unwrap();
 }
-async fn start_other_server() ->  Result<(), Box<dyn Error>>{
-    let socket = TcpListener::bind("127.0.0.1:9000").await?;
-    let user_map : Arc<Mutex<HashMap<PublicKey, Arc<Mutex<TcpStream>>>>> = Arc::new(Mutex::new(HashMap::new()));
-
-    loop {
-        let stream = socket.accept().await?.0;
-        let Ok(data) = verify_user(stream).await else {
-            println!("User un verifiable");
-            break;
-        };
-
-        let mut m = user_map.lock().await;
-        let wrapped_socket = Arc::new(Mutex::new(data.1));
-        m.insert(data.0, wrapped_socket.clone());
-        handle_connection(user_map.clone(), wrapped_socket.clone()).await;
-    }
-
-    Ok(())
-}
-
-async fn verify_user(mut socket: TcpStream) -> Result<(PublicKey,tokio::net::TcpStream), Box<dyn Error>> {
-    let mut buf = [0; 1024];
-    socket.read(&mut buf).await?;
-    let client_pub_key = PublicKey::from_bytes(&buf)?;
-
-    let mut rng = StdRng::from_entropy();
-    let random_secret: u128 = rng.gen();
-
-    let encrypted_secret = rsa_encrypt(&client_pub_key, &random_secret.to_string());
-    socket.write_all(&encrypted_secret[0].to_bytes_le() ).await;
-    
-    buf.fill(0);
-    socket.read(&mut buf).await?;
-    let test_num = BigUint::from_bytes_le(&buf);
-
-    if test_num == random_secret.into() {
-        return Ok((client_pub_key,socket));
-    } else {
-        socket.shutdown();
-        return Err(Box::new(RecvError::Closed));
-    }
-}
-
-async fn handle_connection(user_map : Arc<Mutex<HashMap<PublicKey, Arc<Mutex<TcpStream>>>>>, stream: Arc<Mutex<TcpStream>>) {
-    let mut buf = [0; 1024];
-    loop {
-        let s = stream.lock().await;
-        let b = s.try_read(&mut buf);
-        // if s.try_read(buf)
-        // if s.read(buf)
-    }
-}
-
