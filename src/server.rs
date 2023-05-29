@@ -36,7 +36,7 @@ pub async fn start_server() -> Result<(), Box<dyn Error>> {
 
         let Ok(data) = verify_user(stream.0).await else {
             println!("User un verifiable");
-            break;
+            continue;
         };
 
         println!("User Verified!");
@@ -113,18 +113,16 @@ async fn handle_connection(
     stream: Arc<Mutex<TcpStream>>,
     id: std::net::SocketAddr,
 ) {
-    let mut buf: [u8; 4096] = [0; 4096];
-    // let mut buf = ReadBuf::new(&mut buf);
-
     let mut socket_open = true;
     while socket_open == true {
+        let mut buf =  Vec::with_capacity(4096);
         let mut s = stream.lock().await;
-        println!("Aquired lock for {}\n\tpeeking for data", id);
+        println!("Aquired lock for {} peeking for data", id);
 
-        let in_socket = s.try_read(&mut buf);
+        let in_socket = s.try_read_buf(&mut buf);
         match in_socket {
             Err(_) => {
-                println!("\tNo data in buffer\n\tDropping Lock for {}", id);
+                println!("\tNo data in buffer, Dropping Lock for {}", id);
                 drop(s);
                 tokio::time::sleep(Duration::from_millis(1500)).await;
                 continue;
@@ -140,21 +138,14 @@ async fn handle_connection(
                     // NOTE NEED TO ADD message end character to end of message, or a message length header
                     // How do we know when the message has finsihed transmitting? what if we read at tcp packet one
                     // but we dont wait for packets 2-5, maybe continuely loop inside here
-                    println!("Data in buffer!");
-                    // Append first chunk
-                    let mut big_buffer : Vec<u8> = Vec::new();
-                        let mut trimmed_buffer = buf
-                        .iter()
-                        .enumerate()
-                        .filter(|x| x.0 < num_bytes)
-                        .map(|x| *x.1 as u8)
-                        .collect();
-                    big_buffer.append(&mut trimmed_buffer);
+                    println!("\tData in buffer!");
+                    let mut big_buffer : Vec<u8> = Vec::with_capacity(4096);
+                    big_buffer.append(&mut buf);
 
                     // Loop checking until buffer is empty
                     loop {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
-                        let in_socket = s.try_read(&mut buf);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        let in_socket = s.try_read_buf(&mut buf);
                         match in_socket {
                             Ok(num_bytes) => {
                                 if num_bytes == 0 {
